@@ -1,0 +1,802 @@
+library(dplyr)
+library(rms)
+
+#1. interaction 2. sex male female (autoimmune and subtype) 3. multiple impute 4. self report case and hospitial case
+#5. cox model risk regression (option)  
+
+#1. interaction
+A1 <- Analysisdat
+r <- A1$LDHa
+q <- quantile(r, probs = c(0.25, 0.5, 0.75), na.rm = T)
+m <- cut(r, breaks = c(-Inf, q, Inf), labels = c("Q1", "Q2", "Q3", "Q4"))
+A1$lv <- m
+#A1$mv <- m
+
+table(A1$Disease)
+cox1 <- coxph(Surv(time, as.numeric(Disease)) ~ Age + Sex + BMI + Race + TownsendDeprivationIndex + Foodstyle + SmokingStatus +
+                AlcoholDrinkerStatus + Employment + EducationalAttainment
+              + lv, data = A1)
+negna <- as.numeric(cox1[["na.action"]])
+A1 <- A1[-negna, ]
+
+sensitivitydat <- A1
+sensitivitydat <- sensitivitydat %>% mutate(BMIc = case_when(
+  BMI >= 25 ~ "1",
+  BMI < 25 ~ "0"),
+  Agec = case_when(
+    Age >= 65 ~ "1",
+    Age < 65 ~ "0"
+  ))
+
+
+
+cox1 <- coxph(Surv(time, as.numeric(Disease)) ~ Age + Sex + BMI + Race + TownsendDeprivationIndex + Foodstyle + SmokingStatus +
+                AlcoholDrinkerStatus + Employment + EducationalAttainment
+              + mv, data = sensitivitydat)
+
+summary(cox1)
+covarstr <- 
+  c("Agec + Sex + BMIc + Race + TownsendDeprivationIndex + Foodstyle + SmokingStatus +AlcoholDrinkerStatus + Employment + EducationalAttainment")
+
+covarstr <- gsub(" ", "", covarstr)
+covarstr <- strsplit(covarstr , split = "\\+")[[1]]
+paste0("Surv(time, as.numeric(Disease))", "~", covarstr)
+
+
+paste0(covarstr, collapse = "+")
+listformula <- list()
+
+
+i <- 1
+
+for(i in 1:length(covarstr)){
+  
+  interactterm <- paste0(covarstr[i], " * mv + ")
+  
+  inttermFormula <- paste0(interactterm, paste0(covarstr, collapse = " + "))
+  
+  
+  Formulat <- as.formula(paste0("Surv(time, as.numeric(Disease)) ~ ", inttermFormula))
+  Formulat
+  coxmodel <- coxph(Formulat, data = sensitivitydat)
+  listformula[[i]] <- coxmodel
+}
+
+names(listformula) <- covarstr
+
+summary(listformula[[9]])
+
+
+ggforest(listformula[[2]], 
+         data = sensitivitydat,
+         main = "Hazard Ratio",         
+         cpositions = c(0.02, 0.15, 0.3),  
+         fontsize = 0.8,               
+         refLabel = "Reference",       
+         noDigits = 3)
+
+listresinteraction <-
+  lapply(listformula, function(x) {
+    sumres <- summary(x)
+    paste0(names(sumres$coefficients[, "exp(coef)"][18]), ": ", round(sumres$coefficients[18, "exp(coef)"], 3) , "(", sumres$coefficients[18, "Pr(>|z|)"], ")")
+  }
+  )
+
+listresinteraction <-
+  lapply(listformula, function(x) {
+    sumres <- summary(x)
+    paste0(names(sumres$coefficients[, "exp(coef)"][20:22]), ": ", round(sumres$coefficients[20:22, "exp(coef)"], 3) , "(", sumres$coefficients[20:22, "Pr(>|z|)"], ")")
+  }
+  ) 
+listresinteraction
+
+listformula
+
+split()
+
+df1 <- data.frame(matrix(ncol = 7))[-1, ]
+lapply(1:length(listformula), function(x) {
+  sumres <- summary(listformula[[x]])
+  
+  nlen <- length(names(sumres$coefficients[, "exp(coef)"])) - 19
+  ncoln <- nlen/3
+  df2 <- data.frame(matrix(ncol = 7))
+  for(i in 1:ncoln){
+    df2[i, ] <- c(paste0("  ", strsplit(names(sumres$coefficients[, "exp(coef)"][19+i]), "Q")[[1]][1]),
+                  as.vector(sapply(1:3, function(j) c(paste0(round(sumres$coefficients[19+i+ncoln*(j-1), "exp(coef)"], 3), " (",round(sumres$conf.int[19+i+ncoln*(j-1),"lower .95"], 3), "-", round(sumres$conf.int[19+i+ncoln*(j-1),"upper .95"], 3), ")"),
+                                                      round(sumres$coefficients[19+i+ncoln*(j-1), "Pr(>|z|)"], 4)) )) 
+    )
+    
+  }
+  df3 <- data.frame(matrix(ncol = 7))[-1, ]
+  df3[1, ] <- c(strsplit(names(sumres$coefficients[, "exp(coef)"][19+i]), ":")[[1]][1], rep("", 6))
+  
+  df2 <- rbind(df3, df2)
+  df1 <<- rbind(df1, df2)
+  
+})
+
+
+table(sensitivitydat$Employment)
+
+colnames(df1) <- c("character", "Q2 HR (95%CI)", "P for interaction", "Q3 HR (95%CI)", "P for interaction_2", "Q4 HR (95%CI)", "P for interaction_3")
+
+library(gt)
+library(gtsummary)
+gt_tbl <- gt(df1)
+
+gtsave(gt_tbl, filename = "Tableinteraction_lpa.docx")
+
+
+table(sensitivitydat$Employment)
+########################################################################################
+#2. sex male female (autoimmune and subtype)
+
+
+datoutcomepso <- Sj #684
+datoutcomepso <- Ra #607
+datoutcomepso <- pso  #382
+datoutcomepso <- thyroto #337
+datoutcomepso <- Coelic #266
+datoutcomepso <- ulcerative #221
+datoutcomepso <- type1d #195
+
+
+#AnalysisAutototal <- Analysisdat
+Analysisdat <- AnalysisAutototal
+Analysisdat <- getsubdatfun(dataoutcomepso) #datacov is from "datacov <- getcovdatfun(d1, datademototal)"
+Analysisdat$MVPA <- factor(Analysisdat$MVPA, levels = c("Regular", "Warrior", "Inactive"))
+
+cox1 <- coxph(Surv(time, as.numeric(Disease)) ~ Age  + BMI + Race + TownsendDeprivationIndex + Foodstyle + SmokingStatus +
+                AlcoholDrinkerStatus + Employment + EducationalAttainment
+              + MVPA, data = Analysisdat %>% filter(Sex == "Male"))
+
+cox1 <- coxph(Surv(time, as.numeric(Disease)) ~ Age  + BMI + Race + TownsendDeprivationIndex + Foodstyle + SmokingStatus +
+                AlcoholDrinkerStatus + Employment + EducationalAttainment
+              + MVPA, data = Analysisdat %>% filter(Sex == "Female"))
+
+summary(cox1)
+summary(cox1)$coefficients
+names(summary(cox1)$coefficients[, "exp(coef)"])
+ReandWa <- 16:17
+summary(cox1)$coefficients[, "exp(coef)"][ReandWa]
+summary(cox1)$conf.int[, "lower .95"][ReandWa]
+summary(cox1)$conf.int[, "upper .95"][ReandWa]
+summary(cox1)$coefficients[, "Pr(>|z|)"][ReandWa]
+
+paste0(sprintf("%.2f", summary(cox1)$coefficients[, "exp(coef)"][ReandWa]), " ", "(", sprintf("%.2f", summary(cox1)$conf.int[, "lower .95"][ReandWa]), "-", 
+       sprintf("%.2f", summary(cox1)$conf.int[, "upper .95"][ReandWa]), ")", " ", summary(cox1)$coefficients[, "Pr(>|z|)"][ReandWa])
+summary(cox1)$coefficients[, "Pr(>|z|)"][ReandWa]
+
+
+######################################################################################
+#Subtype disease Accumulated curve
+datoutcomepso <- Sj #684
+datoutcomepso <- Ra #607
+datoutcomepso <- pso  #382
+datoutcomepso <- thyroto #337
+datoutcomepso <- Coelic #266
+datoutcomepso <- ulcerative #221
+datoutcomepso <- type1d #195
+
+
+#AnalysisAutototal <- Analysisdat
+Analysisdat <- AnalysisAutototal
+
+datoutcomepso$ID <- as.character(datoutcomepso$ID)
+accertime$ID <- as.character(accertime$ID)
+Analysisdat <- getsubdatfun(datoutcomepso) #datacov is from "datacov <- getcovdatfun(d1, datademototal)"
+
+Analysisdat$yeartime <- Analysisdat$time/365
+
+fit <- survfit(Surv(yeartime, as.numeric(Disease)) ~ 
+                 MVPA,  data = Analysisdat)
+
+
+p1 <- 
+  ggsurvplot(fit,
+             fun = "cumhaz", 
+             conf.int = F, 
+             palette = "lancet", 
+             pval = TRUE,
+             pval.coord = c(7, 0.001),
+             xlab = "Time in years",
+             risk.table.y.text.col = T, 
+             risk.table.y.text = FALSE, 
+             risk.table = F,
+             surv.scale = "percent",
+             ggtheme = theme_bw()+
+               theme(legend.position = "right",          
+                     legend.justification = "left",
+                     plot.margin = margin(r = 30, unit = "pt"),
+                     plot.title = element_text(size = 20, face = "bold", hjust = 0), 
+                     axis.title.x = element_text(size = 16),
+                     axis.title.y = element_text(size = 16),
+                     axis.text.x = element_text(size = 16),  
+                     axis.text.y = element_text(size = 16),
+                     legend.title = element_text(size = 16, face = "bold"), 
+                     legend.text = element_text(size = 16),
+                     plot.background = element_rect(fill = "#F5F3EA", colour = NA),
+                     panel.background = element_rect(fill = "#F5F3EA"),
+                     legend.background = element_rect(
+                       fill = "#F5F3EA"         
+                     ) )
+  ) + labs(title = "Graves' disease",
+           y = "Cumulative Risk (%)",
+           x = "Years") 
+
+p1 
+sj <- p1
+ra <- p1
+Pso <- p1
+gd <- p1
+listpt <- list(sj[[1]], ra[[1]], Pso[[1]], gd[[1]])
+g1 <- ggarrange(plotlist = listpt, ncol=2, nrow = 2, common.legend = T, legend = "bottom")
+g1 <- ggarrange(plotlist = listpt, ncol=2, nrow = 2, common.legend = T, legend = "top")
+g1 <- ggarrange(plotlist = listpt, ncol=2, nrow = 2, common.legend = T, legend = "right")
+g1
+
+plot1 <- ggarrange(plotlist = listpt, ncol=5, nrow = 3, common.legend = TRUE, legend = "right")
+tiff("F_cuztotal.tif", units = "in", compression = "lzw", width = 10, height = 9, res = 600)
+tiff("F_subtypes.tif", units = "in", compression = "lzw", width = 12, height = 9, res = 600)
+
+g1
+p1
+dev.off()
+dev.new()
+
+
+##########################################################################################################
+#3. multiple impute
+
+
+listna <- lapply(1:ncol(Analysisdat), function(x) which(is.na(Analysisdat[, x])))
+names(listna) <- colnames(Analysisdat)
+
+
+#multipleinputanalysisdat <- Analysisdat
+A1 <- Analysisdat
+r <- A1$MDHa
+r <- A1$LDHa
+q <- quantile(r, probs = c(0.25, 0.5, 0.75), na.rm = T)
+m <- cut(r, breaks = c(-Inf, q, Inf), labels = c("Q1", "Q2", "Q3", "Q4"))
+A1$lv <- m
+table(A1$Disease)
+tb1 <- 
+  A1 %>% select(Age, Sex, BMI, Race, TownsendDeprivationIndex, Foodstyle, SmokingStatus, 
+                AlcoholDrinkerStatus, Employment, EducationalAttainment, lv, Disease) %>% 
+  tbl_summary(by = lv, 
+              statistic = list(all_continuous() ~ "{mean} ± {sd}"), 
+              digits = all_continuous() ~ 2) %>% 
+  add_overall()
+tb1
+t1 <- as_flex_table(tb1) 
+t1
+
+
+cox1 <- coxph(Surv(time, as.numeric(Disease)) ~ Age + Sex + BMI + Race + TownsendDeprivationIndex + Foodstyle + SmokingStatus +
+                AlcoholDrinkerStatus + Employment
+              + lv, data = A1)
+negna <- as.numeric(cox1[["na.action"]])
+A1 <- A1[-negna, ]
+
+
+
+cox1 <- coxph(Surv(time, as.numeric(Disease)) ~ Age + Sex + BMI + Race + TownsendDeprivationIndex + Foodstyle + SmokingStatus +
+                AlcoholDrinkerStatus + Employment
+              + lv, data = A1)
+cox3 <- coxph(Surv(time, as.numeric(Disease)) ~ Age + Sex + BMI + Race  + Foodstyle + SmokingStatus +
+                AlcoholDrinkerStatus
+              + lv, data = A1)
+cox4 <- coxph(Surv(time, as.numeric(Disease)) ~ Age + Sex + BMI + Race
+              + lv, data = A1)
+
+ggforest(cox3, 
+         data = A1,
+         main = "Hazard Ratio",        
+         cpositions = c(0.02, 0.15, 0.3),  
+         fontsize = 0.8,              
+         refLabel = "Reference",       
+         noDigits = 3)
+summary(cox1)
+cox2 <- cox1
+library(grid)
+library(forestploter)
+
+cox.zph(cox2)
+summary(cox2)
+table(A1$Disease)
+ggforest(cox2, 
+         data = A1,
+         main = "Hazard Ratio",         
+         cpositions = c(0.02, 0.15, 0.3), 
+         fontsize = 0.8,              
+         refLabel = "Reference",       
+         noDigits = 3)
+
+
+
+cox2sum <- summary(cox2)
+names(cox2sum$coefficients[, "exp(coef)"])
+length(cox2sum$coefficients[, "exp(coef)"])
+h1 <- cox2sum$coefficients[, "exp(coef)"][16:18]
+h2 <- cox2sum$conf.int[, "lower .95"][16:18]
+h3 <- cox2sum$conf.int[, "upper .95"][16:18]
+HR <- c("Ref", paste0(sprintf("%.3f", h1), " ", "(", sprintf("%.3f", h2), "-", sprintf("%.3f", h3), ")"))
+
+cox2sum <- summary(cox3)
+names(cox2sum$coefficients[, "exp(coef)"])
+h1 <- cox2sum$coefficients[, "exp(coef)"][14:16]
+h2 <- cox2sum$conf.int[, "lower .95"][14:16]
+h3 <- cox2sum$conf.int[, "upper .95"][14:16]
+HR1 <- c("Ref", paste0(sprintf("%.3f", h1), " ", "(", sprintf("%.3f", h2), "-", sprintf("%.3f", h3), ")"))
+
+cox2sum <- summary(cox4)
+names(cox2sum$coefficients[, "exp(coef)"])
+h1 <- cox2sum$coefficients[, "exp(coef)"][8:10]
+h2 <- cox2sum$conf.int[, "lower .95"][8:10]
+h3 <- cox2sum$conf.int[, "upper .95"][8:10]
+HR2 <- c("Ref", paste0(sprintf("%.3f", h1), " ", "(", sprintf("%.3f", h2), "-", sprintf("%.3f", h3), ")"))
+
+HR
+HR1
+HR2
+Outcome <- c("Autoimmune Disease", "", "", "")
+MVPA1 <- c("Q1 (< 1642)", "Q2 (1642-2074)", "Q3 (2074-2548)", "Q4 (> 2548)") 
+
+t1[["body"]][["dataset"]][, 1]
+events <- as.character(t1[["body"]][["dataset"]][32, 3:6])
+1177+718+615+524
+785+816+689+744
+dat1 <- data.frame(Outcome, MVPA1, events, HR)
+dat1$CI <- "                      "
+colnames(dat1) <- c("Outcome", "LPA (min/week)", "Events n(%)", "HR (95 CI%)", " ")
+
+dat2 <- dat1 %>% mutate(HR1 = HR1) %>% mutate(HR2 = HR2) 
+dat2 <- dat2[, -5]
+
+library(flextable)
+
+
+gtsave(dat2 %>% gt(), filename = "Table_MVPAnoimpute.docx")
+
+
+
+
+p <- forest(data = dat1,
+            est = c(1, as.numeric(h1)),
+            lower = c(1, as.numeric(h2)), 
+            upper = c(1, as.numeric(h3)),
+            ci_column = c(5),
+            ref_line = 1,          
+            xlim = c(0.5, 1.5),
+            xticks = c(0.6, 1.0, 1.2),
+            theme = tm)
+p
+tiff("F_nomultipleimput.tif", units = "in", compression = "lzw", width = 12, height = 9, res = 600)
+plot(p)
+dev.off()
+dev.new()
+
+###################################################################################################################
+#4. self report case and hospitial case
+
+
+
+A1 <- Analysisdat
+r <- A1$MDHa
+r <- A1$LDHa
+q <- quantile(r, probs = c(0.25, 0.5, 0.75), na.rm = T)
+m <- cut(r, breaks = c(-Inf, q, Inf), labels = c("Q1", "Q2", "Q3", "Q4"))
+A1$lv <- m
+table(A1$Disease)
+tb1 <- 
+  A1 %>% select(Age, Sex, BMI, Race, TownsendDeprivationIndex, Foodstyle, SmokingStatus, 
+                AlcoholDrinkerStatus, Employment, EducationalAttainment, lv, Disease) %>% 
+  tbl_summary(by = lv, 
+              statistic = list(all_continuous() ~ "{mean} ± {sd}"), 
+              digits = all_continuous() ~ 2) %>% 
+  add_overall()
+tb1
+t1 <- as_flex_table(tb1) 
+t1
+
+
+cox1 <- coxph(Surv(time, as.numeric(Disease)) ~ Age + Sex + BMI + Race + TownsendDeprivationIndex + Foodstyle + SmokingStatus +
+                AlcoholDrinkerStatus + Employment + EducationalAttainment
+              + lv, data = A1)
+negna <- as.numeric(cox1[["na.action"]])
+A1 <- A1[-negna, ]
+
+
+
+cox1 <- coxph(Surv(time, as.numeric(Disease)) ~ Age + Sex + BMI + Race + TownsendDeprivationIndex + Foodstyle + SmokingStatus +
+                AlcoholDrinkerStatus + Employment + EducationalAttainment
+              + lv, data = A1)
+cox3 <- coxph(Surv(time, as.numeric(Disease)) ~ Age + Sex + BMI + Race  + Foodstyle + SmokingStatus +
+                AlcoholDrinkerStatus
+              + lv, data = A1)
+cox4 <- coxph(Surv(time, as.numeric(Disease)) ~ Age + Sex + BMI + Race
+              + lv, data = A1)
+
+ggforest(cox3, 
+         data = A1,
+         main = "Hazard Ratio",         
+         cpositions = c(0.02, 0.15, 0.3),  
+         fontsize = 0.8,               
+         refLabel = "Reference",       
+         noDigits = 3)
+summary(cox1)
+cox2 <- cox1
+library(grid)
+library(forestploter)
+
+cox.zph(cox2)
+summary(cox2)
+table(A1$Disease)
+ggforest(cox2, 
+         data = A1,
+         main = "Hazard Ratio",         
+         cpositions = c(0.02, 0.15, 0.3),  
+         fontsize = 0.8,               
+         refLabel = "Reference",       
+         noDigits = 3)
+
+
+
+cox2sum <- summary(cox2)
+names(cox2sum$coefficients[, "exp(coef)"])
+length(cox2sum$coefficients[, "exp(coef)"])
+h1 <- cox2sum$coefficients[, "exp(coef)"][17:19]
+h2 <- cox2sum$conf.int[, "lower .95"][17:19]
+h3 <- cox2sum$conf.int[, "upper .95"][17:19]
+HR <- c("Ref", paste0(sprintf("%.3f", h1), " ", "(", sprintf("%.3f", h2), "-", sprintf("%.3f", h3), ")"))
+
+cox2sum <- summary(cox3)
+names(cox2sum$coefficients[, "exp(coef)"])
+h1 <- cox2sum$coefficients[, "exp(coef)"][14:16]
+h2 <- cox2sum$conf.int[, "lower .95"][14:16]
+h3 <- cox2sum$conf.int[, "upper .95"][14:16]
+HR1 <- c("Ref", paste0(sprintf("%.3f", h1), " ", "(", sprintf("%.3f", h2), "-", sprintf("%.3f", h3), ")"))
+
+cox2sum <- summary(cox4)
+names(cox2sum$coefficients[, "exp(coef)"])
+h1 <- cox2sum$coefficients[, "exp(coef)"][8:10]
+h2 <- cox2sum$conf.int[, "lower .95"][8:10]
+h3 <- cox2sum$conf.int[, "upper .95"][8:10]
+HR2 <- c("Ref", paste0(sprintf("%.3f", h1), " ", "(", sprintf("%.3f", h2), "-", sprintf("%.3f", h3), ")"))
+
+HR
+HR1
+HR2
+Outcome <- c("Autoimmune Disease", "", "", "")
+MVPA1 <- c("Q1 (< 1642)", "Q2 (1642-2074)", "Q3 (2074-2548)", "Q4 (> 2548)") 
+
+t1[["body"]][["dataset"]][, 1]
+events <- as.character(t1[["body"]][["dataset"]][31, 3:6])
+888+926+788+830
+785+816+689+744
+dat1 <- data.frame(Outcome, MVPA1, events, HR)
+dat1$CI <- "                      "
+colnames(dat1) <- c("Outcome", "LPA (min/week)", "Events n(%)", "HR (95 CI%)", " ")
+
+dat2 <- dat1 %>% mutate(HR1 = HR1) %>% mutate(HR2 = HR2) 
+dat2 <- dat2[, -5]
+
+
+gtsave(dat2 %>% gt(), filename = "Table_MVPAself.docx")
+
+
+p <- forest(data = dat1,
+            est = c(1, as.numeric(h1)),
+            lower = c(1, as.numeric(h2)), 
+            upper = c(1, as.numeric(h3)),
+            ci_column = c(5),
+            ref_line = 1,         
+            xlim = c(0.5, 1.5),
+            xticks = c(0.6, 1.0, 1.2),
+            theme = tm)
+p
+tiff("F_selfreport.tif", units = "in", compression = "lzw", width = 12, height = 9, res = 600)
+plot(p)
+dev.off()
+dev.new()
+###########################################################################################
+# no 365days case
+
+A1 <- Analysisdat
+r <- A1$LDHa
+r <- A1$MDHa
+q <- quantile(r, probs = c(0.25, 0.5, 0.75), na.rm = T)
+m <- cut(r, breaks = c(-Inf, q, Inf), labels = c("Q1", "Q2", "Q3", "Q4"))
+A1$lv <- m
+table(A1$Disease)
+tb1 <- 
+  A1 %>% select(Age, Sex, BMI, Race, TownsendDeprivationIndex, Foodstyle, SmokingStatus, 
+                AlcoholDrinkerStatus, Employment, EducationalAttainment, lv, Disease) %>% 
+  tbl_summary(by = lv, 
+              statistic = list(all_continuous() ~ "{mean} ± {sd}"), 
+              digits = all_continuous() ~ 2) %>% 
+  add_overall()
+tb1
+t1 <- as_flex_table(tb1) 
+t1
+
+
+cox1 <- coxph(Surv(time, as.numeric(Disease)) ~ Age + Sex + BMI + Race + TownsendDeprivationIndex + Foodstyle + SmokingStatus +
+                AlcoholDrinkerStatus + Employment + EducationalAttainment
+              + lv, data = A1)
+negna <- as.numeric(cox1[["na.action"]])
+A1 <- A1[-negna, ]
+
+
+
+cox1 <- coxph(Surv(time, as.numeric(Disease)) ~ Age + Sex + BMI + Race + TownsendDeprivationIndex + Foodstyle + SmokingStatus +
+                AlcoholDrinkerStatus + Employment + EducationalAttainment
+              + lv, data = A1)
+cox3 <- coxph(Surv(time, as.numeric(Disease)) ~ Age + Sex + BMI + Race  + Foodstyle + SmokingStatus +
+                AlcoholDrinkerStatus
+              + lv, data = A1)
+cox4 <- coxph(Surv(time, as.numeric(Disease)) ~ Age + Sex + BMI + Race
+              + lv, data = A1)
+
+ggforest(cox3, 
+         data = A1,
+         main = "Hazard Ratio",         
+         cpositions = c(0.02, 0.15, 0.3),  
+         fontsize = 0.8,               
+         refLabel = "Reference",       
+         noDigits = 3)
+summary(cox1)
+cox2 <- cox1
+library(grid)
+library(forestploter)
+
+cox.zph(cox2)
+summary(cox2)
+table(A1$Disease)
+ggforest(cox2, 
+         data = A1,
+         main = "Hazard Ratio",         
+         cpositions = c(0.02, 0.15, 0.3),  
+         fontsize = 0.8,              
+         refLabel = "Reference",       
+         noDigits = 3)
+
+
+
+cox2sum <- summary(cox2)
+names(cox2sum$coefficients[, "exp(coef)"])
+length(cox2sum$coefficients[, "exp(coef)"])
+h1 <- cox2sum$coefficients[, "exp(coef)"][17:19]
+h2 <- cox2sum$conf.int[, "lower .95"][17:19]
+h3 <- cox2sum$conf.int[, "upper .95"][17:19]
+HR <- c("Ref", paste0(sprintf("%.3f", h1), " ", "(", sprintf("%.3f", h2), "-", sprintf("%.3f", h3), ")"))
+
+cox2sum <- summary(cox3)
+names(cox2sum$coefficients[, "exp(coef)"])
+h1 <- cox2sum$coefficients[, "exp(coef)"][14:16]
+h2 <- cox2sum$conf.int[, "lower .95"][14:16]
+h3 <- cox2sum$conf.int[, "upper .95"][14:16]
+HR1 <- c("Ref", paste0(sprintf("%.3f", h1), " ", "(", sprintf("%.3f", h2), "-", sprintf("%.3f", h3), ")"))
+
+cox2sum <- summary(cox4)
+names(cox2sum$coefficients[, "exp(coef)"])
+h1 <- cox2sum$coefficients[, "exp(coef)"][8:10]
+h2 <- cox2sum$conf.int[, "lower .95"][8:10]
+h3 <- cox2sum$conf.int[, "upper .95"][8:10]
+HR2 <- c("Ref", paste0(sprintf("%.3f", h1), " ", "(", sprintf("%.3f", h2), "-", sprintf("%.3f", h3), ")"))
+
+HR
+HR1
+HR2
+Outcome <- c("Autoimmune Disease", "", "", "")
+MVPA1 <- c("Q1 (< 115)", "Q2 (115-230)", "Q3 (230-403)", "Q4 (> 403)") 
+
+t1[["body"]][["dataset"]][, 1]
+events <- as.character(t1[["body"]][["dataset"]][31, 3:6])
+dat1 <- data.frame(Outcome, MVPA1, events, HR)
+dat1$CI <- "                      "
+colnames(dat1) <- c("Outcome", "MVPA (min/week)", "Events n(%)", "HR (95 CI%)", " ")
+
+dat2 <- dat1 %>% mutate(HR1 = HR1) %>% mutate(HR2 = HR2) 
+dat2 <- dat2[, -5]
+
+
+gtsave(dat2 %>% gt(), filename = "Table_MVPAno730.docx")
+
+
+p <- forest(data = dat1,
+            est = c(1, as.numeric(h1)),
+            lower = c(1, as.numeric(h2)), 
+            upper = c(1, as.numeric(h3)),
+            ci_column = c(5),
+            ref_line = 1,          
+            xlim = c(0.5, 1.5),
+            xticks = c(0.6, 1.0, 1.2),
+            theme = tm)
+p
+tiff("F_no365days.tif", units = "in", compression = "lzw", width = 12, height = 9, res = 600)
+plot(p)
+dev.off()
+dev.new()
+
+
+
+
+###################################################################################################################
+#5. Subgroup(Age) (option)  
+
+hist(A1$Age)
+mean(A1$Age)
+which(A2$Age < 60)
+which(A2$Age >= 60 & A2$Age < 70)
+which(A2$Age >= 70)
+
+A1 <- A2 %>% filter(Age < 60)
+A1 <- A2 %>% filter(Age >= 60 & Age < 70)
+A1 <- A2 %>% filter(Age >= 70)
+r <- A1$LDHa
+r <- A1$MDHa
+q <- quantile(r, probs = c(0.25, 0.5, 0.75), na.rm = T)
+m <- cut(r, breaks = c(-Inf, q, Inf), labels = c("Q1", "Q2", "Q3", "Q4"))
+A1$lv <- m
+table(A1$Disease)
+tb1 <- 
+  A1 %>% select(Age, Sex, BMI, Race, TownsendDeprivationIndex, Foodstyle, SmokingStatus, 
+                AlcoholDrinkerStatus, Employment, EducationalAttainment, lv, Disease) %>% 
+  tbl_summary(by = lv, 
+              statistic = list(all_continuous() ~ "{mean} ± {sd}"), 
+              digits = all_continuous() ~ 2) %>% 
+  add_overall()
+tb1
+t1 <- as_flex_table(tb1) 
+t1
+
+
+cox1 <- coxph(Surv(time, as.numeric(Disease)) ~ Age + Sex + BMI + Race + TownsendDeprivationIndex + Foodstyle + SmokingStatus +
+                AlcoholDrinkerStatus + Employment + EducationalAttainment
+              + lv, data = A1)
+negna <- as.numeric(cox1[["na.action"]])
+A1 <- A1[-negna, ]
+
+
+
+cox1 <- coxph(Surv(time, as.numeric(Disease)) ~ Sex + BMI + Race + TownsendDeprivationIndex + Foodstyle + SmokingStatus +
+                AlcoholDrinkerStatus + Employment + EducationalAttainment
+              + lv, data = A1)
+cox3 <- coxph(Surv(time, as.numeric(Disease)) ~ Sex + BMI + Race  + Foodstyle + SmokingStatus +
+                AlcoholDrinkerStatus
+              + lv, data = A1)
+cox4 <- coxph(Surv(time, as.numeric(Disease)) ~ Sex + BMI + Race
+              + lv, data = A1)
+
+ggforest(cox3, 
+         data = A1,
+         main = "Hazard Ratio",         
+         cpositions = c(0.02, 0.15, 0.3),  
+         fontsize = 0.8,               
+         refLabel = "Reference",       
+         noDigits = 3)
+summary(cox1)
+cox2 <- cox1
+library(grid)
+library(forestploter)
+
+cox.zph(cox2)
+summary(cox2)
+table(A1$Disease)
+ggforest(cox2, 
+         data = A1,
+         main = "Hazard Ratio",        
+         cpositions = c(0.02, 0.15, 0.3),  
+         fontsize = 0.8,               
+         refLabel = "Reference",       
+         noDigits = 3)
+
+
+
+cox2sum <- summary(cox2)
+names(cox2sum$coefficients[, "exp(coef)"])
+length(cox2sum$coefficients[, "exp(coef)"])
+h1 <- cox2sum$coefficients[, "exp(coef)"][16:18]
+h2 <- cox2sum$conf.int[, "lower .95"][16:18]
+h3 <- cox2sum$conf.int[, "upper .95"][16:18]
+HR <- c("Ref", paste0(sprintf("%.3f", h1), " ", "(", sprintf("%.3f", h2), "-", sprintf("%.3f", h3), ")"))
+
+cox2sum <- summary(cox3)
+names(cox2sum$coefficients[, "exp(coef)"])
+h1 <- cox2sum$coefficients[, "exp(coef)"][13:15]
+h2 <- cox2sum$conf.int[, "lower .95"][13:15]
+h3 <- cox2sum$conf.int[, "upper .95"][13:15]
+HR1 <- c("Ref", paste0(sprintf("%.3f", h1), " ", "(", sprintf("%.3f", h2), "-", sprintf("%.3f", h3), ")"))
+
+cox2sum <- summary(cox4)
+names(cox2sum$coefficients[, "exp(coef)"])
+h1 <- cox2sum$coefficients[, "exp(coef)"][7:9]
+h2 <- cox2sum$conf.int[, "lower .95"][7:9]
+h3 <- cox2sum$conf.int[, "upper .95"][7:9]
+HR2 <- c("Ref", paste0(sprintf("%.3f", h1), " ", "(", sprintf("%.3f", h2), "-", sprintf("%.3f", h3), ")"))
+
+HR
+HR1
+HR2
+Outcome <- c("Autoimmune Disease", "", "", "")
+MVPA1 <- c("Q1 (< 115)", "Q2 (115-230)", "Q3 (230-403)", "Q4 (> 403)") 
+
+t1[["body"]][["dataset"]][, 1]
+events <- as.character(t1[["body"]][["dataset"]][31, 3:6])
+dat1 <- data.frame(Outcome, MVPA1, events, HR)
+dat1$CI <- "                      "
+colnames(dat1) <- c("Outcome", "MVPA (min/week)", "Events n(%)", "HR (95 CI%)", " ")
+
+dat2 <- dat1 %>% mutate(HR1 = HR1) %>% mutate(HR2 = HR2) 
+dat2 <- dat2[, -5]
+
+
+gtsave(dat2 %>% gt(), filename = "Table_MVPA80.docx")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
