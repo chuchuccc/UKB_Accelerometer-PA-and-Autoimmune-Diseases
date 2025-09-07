@@ -1,0 +1,468 @@
+library(dplyr)
+library(stringr)
+library(lubridate)
+library(ggplot2)
+library(mice)
+library(survival)
+library(survminer)
+library(rms)
+dd <- datadist(A1)
+options(datadist = "dd")
+
+A2 <- A1 %>% mutate(MDHa = mv)
+
+cox1 <- rms::cph(Surv(time, as.numeric(Disease)) ~ Age + Sex + BMI + Race + TownsendDeprivationIndex + Foodstyle + SmokingStatus +
+                   AlcoholDrinkerStatus + Employment + EducationalAttainment
+                 + rcs(MDHa, 4), data = A1)
+
+
+cox2 <- rms::cph(Surv(time, as.numeric(Disease)) ~ Age + Sex + BMI + Race + TownsendDeprivationIndex + Foodstyle + SmokingStatus +
+                   AlcoholDrinkerStatus + Employment + EducationalAttainment
+                 + MDHa, data = A1)
+
+anova(cox1)
+lrtest(cox2, cox1)
+lrtest(cox1, cox2)
+AIC(cox2)
+AIC(cox1)
+anova(cox2)
+
+p1
+cox1
+cox.zph(cox1)
+summary(cox1)
+table(Analysisdat$Disease)
+summary(cox2)
+
+
+ggforest(cox2, 
+         data = A1,
+         main = "Hazard Ratio",       
+         cpositions = c(0.02, 0.15, 0.3),  
+         fontsize = 0.8,              
+         refLabel = "Reference",      
+         noDigits = 3)
+
+colnames(Analysisdat)
+Analysisdat %>% select(Age, Sex, BMI, Race, TownsendDeprivationIndex, Foodstyle, SmokingStatus, 
+                       AlcoholDrinkerStatus, Employment, EducationalAttainment, Disease) %>% 
+  tbl_summary()
+
+
+A1 <- Analysisdat %>% mutate(Followup = time/365)
+
+
+summary(cox1)
+10382
+#380
+negdel <- which(is.na(A1$Disease))
+A1 <- A1[-negdel, ]
+negdel <- which(is.na(A1$Race))
+length(negdel)
+A1 <- A1[-negdel, ]
+negdel <- which(A1$SmokingStatus == "")
+
+#listna <- lapply(1:ncol(A1), function(x) which(is.na(A1[, x])))
+#names(listna) <- colnames(A1)
+
+table(A1$Disease)
+nrow(A1)
+cox1 <- coxph(Surv(time, as.numeric(Disease)) ~ Age + Sex + BMI + Race + TownsendDeprivationIndex + Foodstyle + SmokingStatus +
+                AlcoholDrinkerStatus + Employment + EducationalAttainment
+              + mv, data = A1)
+
+
+
+tiff("F_Schoenfeld.tif", units = "in", compression = "lzw", width = 15, height = 15, res = 600)
+
+ggcoxzph(cox.zph(cox1))
+dev.off()
+dev.new()
+
+ggforest(cox1, 
+         data = A1,
+         main = "Hazard Ratio",         # 标题
+         cpositions = c(0.02, 0.15, 0.3),  # 前三列间距
+         fontsize = 0.8,               # 字体大小
+         refLabel = "Reference",       # 参考组标签
+         noDigits = 3)
+summary(cox1)
+r <- A1$MDHa
+q <- quantile(r, probs = c(0.25, 0.5, 0.75), na.rm = T)
+m <- cut(r, breaks = c(-Inf, q, Inf), labels = c("Q1", "Q2", "Q3", "Q4"))
+A1$mv <- m
+
+neg1which(A1$MDHwarrior == 1)
+tb1 <- 
+  A1 %>% select(Followup, Age, Sex, BMI, Race, TownsendDeprivationIndex, Foodstyle, SmokingStatus, 
+                AlcoholDrinkerStatus, Employment, EducationalAttainment, MVPA, Disease) %>% 
+  tbl_summary(by = MVPA, 
+              statistic = list(all_continuous() ~ "{mean} ± {sd}"), 
+              digits = all_continuous() ~ 2) %>% 
+  add_overall()
+
+tb1 <- 
+  A1 %>% select(Followup, Age, Sex, BMI, Race, TownsendDeprivationIndex, Foodstyle, SmokingStatus, 
+                AlcoholDrinkerStatus, Employment, EducationalAttainment, mv, Disease) %>% 
+  tbl_summary(by = mv, 
+              statistic = list(all_continuous() ~ "{mean} ± {sd}"), 
+              digits = all_continuous() ~ 2) %>% 
+  add_overall()
+tb1
+
+library(flextable)
+t1 <- as_flex_table(tb1)  
+save_as_docx(t1, path = "Table_characterMVPA.docx")
+
+
+##################################################################################################
+dd <- datadist(A1)
+options(datadist = "dd")
+cox1 <- rms::cph(Surv(time, as.numeric(Disease)) ~ Age + Sex + BMI + Race + TownsendDeprivationIndex + Foodstyle + SmokingStatus +
+                   AlcoholDrinkerStatus + Employment + EducationalAttainment
+                 + rcs(MDHa, 4), data = A1)
+
+cox1 <- rms::cph(Surv(time, as.numeric(Disease)) ~ Age + BMI + Race + TownsendDeprivationIndex + Foodstyle + SmokingStatus +
+                   AlcoholDrinkerStatus + Employment + EducationalAttainment
+                 + rcs(MDHa, 4), data = A1 %>% filter(Sex == "Female"))
+anova(cox1)
+
+
+pred_data <- rms::Predict(cox1, MDHa, Sex, fun = exp) %>% data.frame()
+
+p1 <- 
+  ggplot(data = pred_data, aes(x = MDHa, y = yhat)) +
+  geom_line(aes(color = Sex), size = 2) +  
+  geom_ribbon(
+    aes(ymin = lower, ymax = upper, fill = Sex), 
+    alpha = 0.15  
+  ) +
+  geom_hline(yintercept = 1, color = "grey20", linetype = 2) +
+  scale_color_manual(
+    values = c("Male" = "lightblue", "Female" = "#ff7d7d")  
+  ) +
+  scale_fill_manual(
+    values = c("Male" = "lightblue", "Female" = "#ff7d7d")  
+  ) +
+  scale_x_continuous(
+    breaks = c(0, 100, 200, 300, 400, 500, 1000, 2000),  
+    expand = c(0, 0)  
+  ) +scale_y_continuous(
+    breaks = c(0, 0.4, 0.8, 1, 1.2, 1.6, 20)  
+  ) +
+  theme_classic() +
+  labs(x = "MVPA (minutes/week)", y = "Hazard Ratio (HR 95% CI)")+
+  geom_vline(
+    xintercept = c(115, 230, 403),         
+    linetype = "dashed",
+    color = "black"
+  ) + annotate("label", x = c(57.5, 172.5, 316.5, 500), y = 1.6, 
+               label = c("Q1", "Q2", "Q3", "Q4"), 
+               fill = alpha("white", 1),  
+               color = "skyblue", 
+               fontface = "bold",
+               size = 6) + theme( axis.title.x = element_text(size = 18, face = "bold"), # X轴标题
+                                  axis.title.y = element_text(size = 18, face = "bold"),
+                                  axis.text.x = element_text(size = 16),  # X轴刻度标签
+                                  axis.text.y = element_text(size = 16),
+                                  legend.text = element_text(size = 16), 
+                                  legend.title = element_text(size = 18))+
+  annotate("text", 
+           x = 2000, y = 1.6, 
+           label = c(expression(italic(P)["Total"]<"0.0001")), 
+           fontface = "bold",
+           size = 5)+
+  annotate("text", 
+           x = 2000, y = 1.55, 
+           label = expression(italic(P)["Nolinear(Male)"]=="0.0118"), 
+           fontface = "bold",
+           size = 5)+
+  annotate("text", 
+           x = 2000, y = 1.5, 
+           label = expression(italic(P)["Nolinear(Female)"]<"0.0001"), 
+           fontface = "bold",
+           size = 5) 
+
+p1
+
+#plot.background = element_rect(fill = "#F5F3EA", colour = NA),
+#panel.background = element_rect(fill = "#F5F3EA"),
+#legend.background = element_rect(fill = "#F5F3EA"         # 边框粗细)
+
+
+tiff("F_MVPA.tif", units = "in", compression = "lzw", width = 11, height = 8, res = 600)
+
+plot(p1)
+dev.off()
+dev.new()
+
+pred_data1 <- rms::Predict(cox1, MDHa, fun = exp) %>% data.frame()
+p2 <- 
+  ggplot(data = pred_data1, aes(x = MDHa, y = yhat)) +
+  geom_line(size = 2, color = "lightblue") +  
+  geom_ribbon(
+    aes(ymin = lower, ymax = upper), 
+    fill = "lightblue", 
+    alpha = 0.15  
+  ) +
+  geom_hline(yintercept = 1, color = "grey20", linetype = 2) +
+  scale_x_continuous(
+    breaks = c(0, 100, 200, 300, 400, 500, 1000, 2000),  
+    expand = c(0, 0)  
+  ) +scale_y_continuous(
+    breaks = c(0, 0.4, 0.8, 1, 1.2, 1.6, 20)  
+  ) +
+  theme_classic() +
+  labs(x = "MVPA (minutes/week)", y = "Hazard Ratio (HR 95% CI)")+
+  geom_vline(
+    xintercept = c(115, 230, 403),         
+    linetype = "dashed",
+    color = "black"
+  ) + annotate("label", x = c(57.5, 172.5, 316.5, 500), y = 1.6, 
+               label = c("Q1", "Q2", "Q3", "Q4"), 
+               fill = alpha("white", 1), 
+               color = "skyblue", 
+               fontface = "bold",
+               size = 6) + theme( axis.title.x = element_text(size = 18, face = "bold"), 
+                                  axis.title.y = element_text(size = 18, face = "bold"),
+                                  axis.text.x = element_text(size = 16),  
+                                  axis.text.y = element_text(size = 16),
+                                  legend.text = element_text(size = 16))+
+  annotate("text", 
+           x = 2000, y = 1.52, 
+           label = c(expression(italic(P)["Total"]<"0.0001")), 
+           fontface = "bold",
+           size = 5)+
+  annotate("text", 
+           x = 2000, y = 1.47, 
+           label = expression(italic(P)["Nolinear"]<"0.0001"), 
+           fontface = "bold",
+           size = 5)
+p2
+tiff("F_MVPAt.tif", units = "in", compression = "lzw", width = 10, height = 8, res = 600)
+
+plot(p2)
+dev.off()
+dev.new()
+
+#######################################################################################
+#MAKE TABLE and Figure
+library(grid)
+library(forestploter)
+
+A1 <- Analysisdat
+r <- A1$MDHa
+r <- A1$LDHa
+q <- quantile(r, probs = c(0.25, 0.5, 0.75), na.rm = T)
+m <- cut(r, breaks = c(-Inf, q, Inf), labels = c("Q1", "Q2", "Q3", "Q4"))
+A1$mv <- m
+
+
+table(A1$Disease)
+tb1 <- 
+  A1 %>% select(Age, Sex, BMI, Race, TownsendDeprivationIndex, Foodstyle, SmokingStatus, 
+                AlcoholDrinkerStatus, Employment, EducationalAttainment, mv, Disease) %>% 
+  tbl_summary(by = mv, 
+              statistic = list(all_continuous() ~ "{mean} ± {sd}"), 
+              digits = all_continuous() ~ 2) %>% 
+  add_overall()
+tb1
+t1 <- as_flex_table(tb1) 
+t1
+save_as_docx(t1, path = "Tablec.docx")
+
+cox1 <- coxph(Surv(time, as.numeric(Disease)) ~ Age + Sex + BMI + Race + TownsendDeprivationIndex + Foodstyle + SmokingStatus +
+                AlcoholDrinkerStatus + Employment + EducationalAttainment
+              + mv, data = A1)
+negna <- as.numeric(cox1[["na.action"]])
+A1 <- A1[-negna, ]
+
+
+
+cox1 <- coxph(Surv(time, as.numeric(Disease)) ~ Age + Sex + BMI + Race + TownsendDeprivationIndex + Foodstyle + SmokingStatus +
+                AlcoholDrinkerStatus + Employment + EducationalAttainment
+              + mv, data = A1)
+cox3 <- coxph(Surv(time, as.numeric(Disease)) ~ Age + Sex + BMI + Race  + Foodstyle + SmokingStatus +
+                AlcoholDrinkerStatus
+              + mv, data = A1)
+cox4 <- coxph(Surv(time, as.numeric(Disease)) ~ Age + Sex + BMI + Race
+              + mv, data = A1)
+
+ggforest(cox3, 
+         data = A1,
+         main = "Hazard Ratio",        
+         cpositions = c(0.02, 0.15, 0.3), 
+         fontsize = 0.8,               
+         refLabel = "Reference",       
+         noDigits = 3)
+summary(cox1)
+cox2 <- cox1
+library(grid)
+library(forestploter)
+
+cox.zph(cox2)
+summary(cox2)
+table(A1$Disease)
+ggforest(cox2, 
+         data = A1,
+         main = "Hazard Ratio",         
+         cpositions = c(0.02, 0.15, 0.3),  
+         fontsize = 0.8,               
+         refLabel = "Reference",       
+         noDigits = 3)
+
+
+
+cox2sum <- summary(cox2)
+names(cox2sum$coefficients[, "exp(coef)"])
+length(cox2sum$coefficients[, "exp(coef)"])
+h1 <- cox2sum$coefficients[, "exp(coef)"][17:19]
+h2 <- cox2sum$conf.int[, "lower .95"][17:19]
+h3 <- cox2sum$conf.int[, "upper .95"][17:19]
+HR <- c("Ref", paste0(sprintf("%.3f", h1), " ", "(", sprintf("%.3f", h2), "-", sprintf("%.3f", h3), ")"))
+pv1 <- cox2sum$coefficients[, "Pr(>|z|)"][17:19]
+s1 <- sapply(pv1, function(x) format_smart(x))
+s1
+
+
+cox2sum <- summary(cox3)
+names(cox2sum$coefficients[, "exp(coef)"])
+h1 <- cox2sum$coefficients[, "exp(coef)"][14:16]
+h2 <- cox2sum$conf.int[, "lower .95"][14:16]
+h3 <- cox2sum$conf.int[, "upper .95"][14:16]
+HR1 <- c("Ref", paste0(sprintf("%.3f", h1), " ", "(", sprintf("%.3f", h2), "-", sprintf("%.3f", h3), ")"))
+
+cox2sum <- summary(cox4)
+names(cox2sum$coefficients[, "exp(coef)"])
+h1 <- cox2sum$coefficients[, "exp(coef)"][8:10]
+h2 <- cox2sum$conf.int[, "lower .95"][8:10]
+h3 <- cox2sum$conf.int[, "upper .95"][8:10]
+HR2 <- c("Ref", paste0(sprintf("%.3f", h1), " ", "(", sprintf("%.3f", h2), "-", sprintf("%.3f", h3), ")"))
+
+
+Outcome <- c("Autoimmune Disease", "", "", "")
+MVPA1 <- c("Q1 (< 115)", "Q2 (115-230)", "Q3 (230-403)", "Q4 (> 403)") 
+
+t1[["body"]][["dataset"]][, 1]
+events <- as.character(t1[["body"]][["dataset"]][31, 3:6])
+dat1 <- data.frame(Outcome, MVPA1, events, HR)
+dat1$CI <- "                      "
+colnames(dat1) <- c("Outcome", "MVPA (min/week)", "Events n(%)", "HR (95 CI%)", " ")
+
+colnames(dat1) <- colnames(dat2)
+###########################################
+format_smart <- function(x, digits = 4) {
+  if (is.na(x) || x == 0) return("")  
+  
+ 
+  if (abs(x) >= 0.0001) {
+   
+    x1 <- round(x, 4)
+    sprintf("%.*f", max(0, digits - floor(log10(abs(x))) - 1), x1)
+  } else {
+    
+    sci_str <- format(x, scientific = TRUE, digits = 4)
+    parts <- strsplit(sci_str, "e")[[1]]
+    base <- sprintf("%.2f", as.numeric(parts[1]))  
+    exp_val <- as.numeric(parts[2])
+    
+    superscript <- c("⁰", "¹", "²", "³", "⁴", "⁵", "⁶", "⁷", "⁸", "⁹", "⁻")
+    exp_str <- ifelse(exp_val < 0, "⁻", "")
+    exp_digits <- as.integer(strsplit(as.character(abs(exp_val)), "")[[1]])
+    exp_str <- paste0(exp_str, paste0(superscript[exp_digits + 1], collapse = ""))
+    paste0(base, "×10", exp_str)  
+  }
+}
+
+hh1 <- h1
+hh2 <- h2
+hh3 <- h3
+
+dat[, 6] <- rep(1, 8)
+
+dat <- rbind(dat2, dat1)
+dat[1, 1] <- c("LPA")
+dat[5, 1] <- c("MVPA")
+colnames(dat)[2] <- "PA (min/week)"
+colnames(dat)[6] <- "P-value"
+
+pv <- round(pv1, 4)
+s1
+dat[, 6] <- c("", pv, "", s1)
+
+p <- forest(data = dat,
+            est = c(1, as.numeric(c(h1, 1, hh1))),
+            lower = c(1, as.numeric(c(h2, 1, hh2))), 
+            upper = c(1, as.numeric(c(h3, 1, hh3))),
+            ci_column = c(5),
+            ref_line = 1,       
+            xlim = c(0.5, 1.5),
+            xticks = c(0.6, 1.0, 1.2),
+            theme = tm)
+p
+###########################################
+
+
+dat2 <- dat1 %>% mutate(HR1 = HR1) %>% mutate(HR2 = HR2) 
+dat2 <- dat2[, -5]
+
+library(flextable)
+
+
+gtsave(dat2 %>% gt(), filename = "MVPAtable.docx")
+
+
+p <- forest(data = dat,
+            est = c(1, as.numeric(h1)),
+            lower = c(1, as.numeric(h2)), 
+            upper = c(1, as.numeric(h3)),
+            ci_column = c(5),
+            ref_line = 1,      
+            xlim = c(0.5, 1.5),
+            xticks = c(0.6, 1.0, 1.2),
+            theme = tm)
+p
+tiff("Fforest.tif", units = "in", compression = "lzw", width = 15, height = 9, res = 600)
+plot(p)
+dev.off()
+dev.new()
+plot(1:10)
+n <- nrow(dat1)
+fill_colors <- ifelse(1:n %% 2 == 1, "lightblue", "white")
+
+tm <- forest_theme(
+  core = list(
+    bg_params = list(fill = fill_colors) 
+  ))
+tm <- forest_theme(# Confidence interval point shape, line type/color/width
+  ci_pch = 15,
+  ci_col = "#762a83",
+  ci_fill = "black",
+  ci_alpha = 0.8,
+  ci_lty = 1,
+  ci_lwd = 1.5,
+  ci_Theight = 0.2,
+  core = list(
+    bg_params = list(fill = fill_colors) 
+  ))
+
+
+h1[1]
+h2
+h3
+
+i <- 2
+library(EValue)
+lapply(1:3, function(i)evalues.HR(est = h1[i], lo = h2[i], hi = h3[i], rare = TRUE))
+
+
+evalues.HR(est = h1[i], lo = h2[i], hi = h3[i], rare = TRUE)
+
+
+
+
+
+
+
+
+
